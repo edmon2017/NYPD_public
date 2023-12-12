@@ -1,0 +1,168 @@
+---
+title: "NYPD Shooting Incident Data Analysis"
+author: "E.Moncayo"
+date: "November 3 2023"
+output: html_document
+---
+
+## NYPD Shooting Incident Data
+
+This is an analysis of the NYPD Shooting Incident Data, the variable OCCUR_DATE was change to date and some of the other variables were change to factor type.
+
+There is no missing data in the OCCUR_DATE and BORO, 
+There are some variables with many empty and NA values like LOC_OF_OCCUR_DESC, LOC_CLASSFCTN_DESC, PERP_AGE_GROUP. These variables are not used in the analysis. Other variables were removed: Lon_Lat, X_COORD_CD and Y_COORD_CD, because the spatial location of the event was already other columns. 
+
+This is the summary of the NYPD Shooting Incident Data
+
+### Data Summary
+
+```{r shooting, echo=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+url_in <- "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+shooting <- read_csv(url_in)
+
+shoot_edited <- shooting %>%
+    mutate(OCCUR_DATE = mdy(OCCUR_DATE),
+    BORO = factor(BORO),
+    LOC_OF_OCCUR_DESC = factor(LOC_OF_OCCUR_DESC),
+    JURISDICTION_CODE = factor(JURISDICTION_CODE),
+    PERP_AGE_GROUP = factor(PERP_AGE_GROUP),
+    PERP_SEX = factor(PERP_SEX),
+    PERP_RACE = factor(PERP_RACE),
+    VIC_SEX = factor(VIC_SEX),
+    VIC_RACE = factor(VIC_RACE),
+    VIC_AGE_GROUP = factor(VIC_AGE_GROUP)) %>%
+    select(-c(LOC_OF_OCCUR_DESC,LOCATION_DESC,   LOC_CLASSFCTN_DESC,Lon_Lat,X_COORD_CD,Y_COORD_CD))
+
+  
+summary(shoot_edited)
+
+```
+
+### Visualizations
+
+This graph shows the distribution of shootings by year and month:
+
+
+```{r chart-events, echo=FALSE, message=FALSE, warning=FALSE}
+shoot_edited1 <- shoot_edited %>%
+     mutate(year= format(OCCUR_DATE, "%Y"),
+            month = format(OCCUR_DATE, "%m")) %>%
+     group_by(year, month) %>%
+     summarize(events = n()) %>%
+     mutate(date = as.Date(paste(year, month, "01", sep = "-")))
+
+shoot_edited1 %>%
+  ggplot(aes(x=date, y=events)) +
+  geom_line() +
+  labs(x = "Date", y = "Shootings", title = "Shootings by Year and Month")
+```
+
+This graph shows the distribution of shootings by boroughs:
+
+
+```{r chart-boro, echo=FALSE, message=FALSE, warning=FALSE}
+shoot_edited1 <- shoot_edited %>%
+     group_by(BORO) %>%
+     summarize(events = n())
+     
+shoot_edited1 %>%
+  ggplot(aes(x=BORO, y=events)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Boroughs", y = "Shootings", title = "Shootings by boroughs")
+```
+
+### Analysis
+
+Based on these graphs there are some interesting points:
+
+* There was a peak of events in 2020
+* There is a cyclic behavior throughout the year
+* Brooklyn and Bronx are the boroughs with more events
+
+Some additional questions to investigate are:
+
+1. Is the 2020 a data error, or is it real?
+2. Did the 2020 peak occur only in one district or is it present in all off them?
+3. Are the observed cycles related only to one district or are they present in all of them? 
+4. What could be the causes of the 2020 peak
+5. What could be the causes of the high number of events in Brookling and       Bronx areas
+
+```{r chart-eventsboro, echo=FALSE, message=FALSE, warning=FALSE}
+shoot_edited1 <- shoot_edited %>%
+     mutate(year= format(OCCUR_DATE, "%Y"),
+            month = format(OCCUR_DATE, "%m")) %>%
+     group_by(BORO, year, month) %>%
+     summarize(events = n()) %>%
+     mutate(date = as.Date(paste(year, month, "01", sep = "-")))
+
+shoot_edited1 %>%
+  ggplot(aes(x=date, y=events)) +
+  geom_line(aes(color = BORO)) +
+  labs(x = "Date", y = "Shootings", title = "Shootings by Year and Month")
+```
+
+Based on previous plot, the 2020 peak is present for 4 of 5 boroughs, so this is not an error in the data. Furthermore, based on the following graph, the cyclical behavior is presented in all the boroughs, with the highest number of the events in July and the  lowest in February.
+
+```{r chart-month, echo=FALSE, message=FALSE, warning=FALSE}
+shoot_edited1 <- shoot_edited %>%
+     mutate(year= format(OCCUR_DATE, "%Y"),
+            month = format(OCCUR_DATE, "%m")) %>%
+     group_by(BORO, month) %>%
+     summarize(events = n())
+
+shoot_edited1 %>%
+  ggplot(aes(x=month, y=events)) +
+  geom_bar(stat = "identity",aes(color = BORO)) +
+  labs(x = "Month", y = "Shootings", title = "Shootings by month")
+```
+
+### Modelling
+
+The next plot shows a linear regression to model the number of murders by month using the number of events by month as input variable. The results indicate there is a clear relation between shootings and murders
+
+```{r model_data, echo=FALSE, message=FALSE, warning=FALSE}
+shoot_edited2 <- shoot_edited %>%
+     mutate(year= format(OCCUR_DATE, "%Y"),
+            month = format(OCCUR_DATE, "%m")) %>%
+     group_by(year, month) %>%
+     summarize(events = n(), murders= sum(as.numeric(STATISTICAL_MURDER_FLAG)))%>%
+     mutate(date = as.Date(paste(year, month, "01", sep = "-")))
+
+mod_shoot <- lm(murders ~ events, data = shoot_edited2)
+summary(mod_shoot)
+
+shoot_pred <- shoot_edited2
+shoot_pred$pred = predict(mod_shoot)
+
+shoot_pred %>% ggplot() + 
+  geom_point(aes(x = events, y= murders), color = "blue") +
+  geom_point(aes(x = events, y= pred), color = "red")
+
+```
+
+
+### Bias identification
+
+Some possible sources of bias are :
+
+* Changes in practices and social attitudes over time can impact both the number of shootings and how they are reported.
+
+* The perspective of the person recording the data. Law enforcement officers may   describe an incident differently based on their perceptions.
+
+* Inaccuracies in the way incidents are recorded, such a incorrect classification or errors in details like time or individuals involved 
+
+* Not all incidents may be reported with the same rigor, and some may not be recorded
+
+My personal bias could be related to the influence of news and social media, which generally presents the Bronx as a dangerous place in New York, this could make me to expect the highest number of events in this area and draw the wrong conclusions. To mitigate this, I did an exploratory analysis of the data to verify the distribution of the data in the boroughs, to verify there was no significant differences in the integrity of the data, in addition I also applied the same filters and managed all the boroughs in the same way .
+
+### Conclusions
+
+* The June-July 2020 peak is present for 4 of 5 boroughs, so this is not an error in the data, could be related to the COVID because at that time the city began the first phase of its reopening plan.
+
+* There is a cyclical behavior throughout the year with most of the events reported in July and the lower number in February.
+
+* The borough with most of the events is Brooklyn, however this analysis does not consider differences in the population or the area of the districts. 
+
+
